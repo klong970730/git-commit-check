@@ -8,14 +8,15 @@
     <name>Git-scan-demo</name>
 
     <!-- A displayed Vendor name or Organization ID displayed on the Plugins Page. -->
-    <vendor email="support@yourcompany.com" url="https://www.yourcompany.com">YourCompany</vendor>
+    <vendor email="xxx@xxx.com" url="https://www.xxx.com">xxx</vendor>
 
     <!-- Description of the plugin displayed on the Plugin Page and IDE Plugin Manager.
          Simple HTML elements (text formatting, paragraphs, and lists) can be added inside of <![CDATA[ ]]> tag.
          Guidelines: https://plugins.jetbrains.com/docs/marketplace/plugin-overview-page.html#plugin-description -->
     <description><![CDATA[
-    Enter short description for your plugin here.<br>
-    <em>most HTML tags may be used</em>
+    support Small Cell Specification.<br>
+    <em>Analyse Commit Lines</em>
+    <em>Analyse Commit Message</em>
   ]]></description>
 
     <!-- Product and plugin compatibility requirements.
@@ -29,7 +30,9 @@
     <!-- Extension points defined by the plugin.
          Read more: https://plugins.jetbrains.com/docs/intellij/plugin-extension-points.html -->
     <extensions defaultExtensionNs="com.intellij">
-        <applicationService serviceImplementation="com.example.git.scan.CommitLinesConfig"/>
+        <applicationService serviceImplementation="com.example.git.scan.SmallCellSettingConfig"/>
+        <projectConfigurable groupId="other" instance="com.example.git.scan.SmallCellSettingConfigure" displayName="Small Cell Setting" nonDefaultProject="false" />
         <checkinHandlerFactory implementation="com.example.git.scan.CommitLinesCheckinHandlerFactory"/>
+        <checkinHandlerFactory implementation="com.example.git.scan.CommitMessageCheckinHandlerFactory"/>
     </extensions>
 </idea-plugin>

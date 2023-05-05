@@ -1,12 +1,16 @@
 package com.example.git.scan;
 
-import com.intellij.diff.applications.DiffApplicationBase;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.progress.ProcessCanceledException;
+import com.intellij.openapi.progress.ProgressIndicator;
+import com.intellij.openapi.progress.ProgressManager;
+import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.vcs.CheckinProjectPanel;
 import com.intellij.openapi.vcs.ProjectLevelVcsManager;
+import com.intellij.openapi.vcs.changes.Change;
 import com.intellij.openapi.vcs.changes.CommitExecutor;
 import com.intellij.openapi.vcs.checkin.CheckinHandler;
 import com.intellij.openapi.vcs.checkin.CheckinHandlerUtil;
@@ -16,6 +20,7 @@ import com.intellij.psi.PsiDocumentManager;
 import com.intellij.ui.NonFocusableCheckBox;
 import com.intellij.util.PairConsumer;
 
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.awt.*;
@@ -31,6 +36,8 @@ import git4idea.commands.GitCommand;
 import git4idea.commands.GitCommandResult;
 import git4idea.commands.GitLineHandler;
 
+import static com.example.git.scan.SmallCellSettingConfig.getConfig;
+
 /**
  * @author klong
  */
@@ -42,9 +49,13 @@ public class CommitLinesCheckinHandler extends CheckinHandler {
   private String commitText = "&Commit Anyway";
   private String waitingText = "Wait";
   protected Project myProject;
+
+  private SmallCellSettingConfig config;
   private CheckinProjectPanel panel;
 
   private Map<String, String[]> gitDiffNumStat = new HashMap<>(16);
+
+  private Long total;
 
   private static final ArrayList<String> PHRASES = new ArrayList<>(List.of(
           "辛苦了,好棒!",
@@ -65,13 +76,14 @@ public class CommitLinesCheckinHandler extends CheckinHandler {
 
 
   public CommitLinesCheckinHandler(Project myProject, CheckinProjectPanel panel) {
+    this.config = getConfig();
     this.myProject = myProject;
     this.panel = panel;
   }
 
   @Override
   public ReturnResult beforeCheckin(@Nullable CommitExecutor executor, PairConsumer<Object, Object> additionalDataConsumer) {
-    if (!getConfig().isScanBeforeCommit()) {
+    if (!config.isAnalyseCommitLines()) {
       return ReturnResult.COMMIT;
     }
     if (DumbService.getInstance(myProject).isDumb()) {
@@ -83,23 +95,23 @@ public class CommitLinesCheckinHandler extends CheckinHandler {
     List<VirtualFile> virtualFiles = CheckinHandlerUtil.filterOutGeneratedAndExcludedFiles(panel.getVirtualFiles(), myProject);
     boolean hasViolation = hasViolation(virtualFiles, myProject);
     if (!hasViolation) {
-      BalloonNotifications.showSuccessNotification(randomPhase(200L), myProject, "Analyze Finished");
+      BalloonNotifications.showSuccessNotification(randomPhase(total), myProject, "Analyze Finished");
       return CheckinHandler.ReturnResult.COMMIT;
     }
 
-    if (Messages.showOkCancelDialog(myProject, "Commit lines greater than 200!,continue commit?",
+    if (Messages.showOkCancelDialog(myProject, "Commit lines greater than " + config.getMaxCommitLines() + "!,continue commit?",
             dialogTitle, commitText, cancelText, null) == Messages.OK) {
       return CheckinHandler.ReturnResult.COMMIT;
     } else {
       doAnalysis(myProject, virtualFiles);
-      return CheckinHandler.ReturnResult.CLOSE_WINDOW;
+      return ReturnResult.CANCEL;
     }
 
 
   }
 
   private void doAnalysis(Project myProject, List<VirtualFile> virtualFiles) {
-
+    //todo show every file's modify lines
   }
 
   private boolean hasViolation(List<VirtualFile> virtualFiles, Project myProject) {
@@ -109,15 +121,16 @@ public class CommitLinesCheckinHandler extends CheckinHandler {
       throw new RuntimeException("Must not run under write action");
     }
 
-    try {
-      DiffApplicationBase.refreshAndEnsureFilesValid(virtualFiles);
-    } catch (Exception e) {
-      throw new RuntimeException(e);
-    }
+//    try {
+//      DiffApplicationBase.refreshAndEnsureFilesValid(virtualFiles);
+//    } catch (Exception e) {
+//      throw new RuntimeException(e);
+//    }
 
     gitDiffNumStat.clear();
     getGitDiffNumStat(virtualFiles, myProject);
-    return gitDiffNumStat.values().stream().mapToLong(this::calculateChangeLinesNum).sum() > 200L;
+    total = gitDiffNumStat.values().stream().mapToLong(this::calculateChangeLinesNum).sum();
+    return total > config.getMaxCommitLines();
   }
 
   private Long calculateChangeLinesNum(String[] v) {
@@ -147,17 +160,45 @@ public class CommitLinesCheckinHandler extends CheckinHandler {
         break;
       }
     }
-    GitLineHandler handler = new GitLineHandler(myProject, vcsRoot, GitCommand.DIFF);
-    handler.addParameters("HEAD");
-    handler.addParameters("--numstat");
-    GitCommandResult gitCommandResult = Git.getInstance().runCommand(handler);
-    // 10 10  file.txt : insert  deleted  filename
-    String output = gitCommandResult.getOutputAsJoinedString();
-    String[] lines = output.split("\n");
-    for (String line : lines) {
-      String[] split = line.split("\t", 3);
-      gitDiffNumStat.put(split[2], split);
+
+    GitLineHandler commit = new GitLineHandler(myProject, vcsRoot, GitCommand.COMMIT);
+    commit.addParameters("-o");
+    for (Change change : panel.getSelectedChanges()) {
+      commit.addParameters(change.getAfterRevision().getFile().getPath());
     }
+    commit.addParameters("-m");
+    commit.addParameters("test-commit");
+
+    GitLineHandler diff = new GitLineHandler(myProject, vcsRoot, GitCommand.DIFF);
+    diff.addParameters("HEAD~1");
+    diff.addParameters("HEAD~0");
+    diff.addParameters("--numstat");
+
+    GitLineHandler reset = new GitLineHandler(myProject, vcsRoot, GitCommand.RESET);
+    reset.addParameters("HEAD~1");
+    reset.addParameters("--soft");
+    ProgressManager.getInstance().run(new Task.Modal(myProject, dialogTitle, true) {
+      @Override
+      public void run(@NotNull ProgressIndicator indicator) {
+        try {
+          Git git = Git.getInstance();
+          git.runCommand(commit);
+          GitCommandResult gitCommandResult = git.runCommand(diff);
+          git.runCommand(reset);
+
+          // 10 10  file.txt : insert  deleted  filename
+          String output = gitCommandResult.getOutputAsJoinedString();
+          String[] lines = output.split("\n");
+          for (String line : lines) {
+            String[] split = line.split("\t", 3);
+            gitDiffNumStat.put(split[2], split);
+          }
+        } catch (ProcessCanceledException canceledException) {
+          gitDiffNumStat.clear();
+        }
+
+      }
+    });
   }
 
   @Override
@@ -166,13 +207,18 @@ public class CommitLinesCheckinHandler extends CheckinHandler {
       final NonFocusableCheckBox checkBox = new NonFocusableCheckBox(dialogTitle);
 
       @Override
+      public void refresh() {
+
+      }
+
+      @Override
       public void saveState() {
-        getConfig().setScanBeforeCommit(checkBox.isSelected());
+        getConfig().setAnalyseCommitLines(checkBox.isSelected());
       }
 
       @Override
       public void restoreState() {
-        checkBox.setSelected(getConfig().isScanBeforeCommit());
+        checkBox.setSelected(getConfig().isAnalyseCommitLines());
       }
 
       @Override
@@ -191,12 +237,9 @@ public class CommitLinesCheckinHandler extends CheckinHandler {
     };
   }
 
-  private static CommitLinesConfig getConfig() {
-    return ApplicationManager.getApplication().getService(CommitLinesConfig.class);
-  }
 
   private static String randomPhase(Long lines) {
-    return "本次提交"+lines+"行,".concat(PHRASES.get((int) (Math.random()* PHRASES.size())));
+    return "本次提交" + lines + "行,".concat(PHRASES.get((int) (Math.random() * PHRASES.size())));
   }
 
 
