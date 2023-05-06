@@ -49,9 +49,15 @@ public class SmallCellSettingConfigure implements SearchableConfigurable {
   }
 
   @Override
+  public void reset() {
+    view.init(config);
+  }
+
+  @Override
   public boolean isModified() {
-    return view.analyseDiffLinesBeforeCheckBox() != config.isAnalyseCommitLines()
-            || view.analyseCommitMessageCheckBox() != config.isAnalyseCommitMessage()
+    return !view.analyseDiffLinesBeforeCheckBox().equals(config.isAnalyseCommitLines())
+            || !view.analyseCommitMessageCheckBox().equals(config.isAnalyseCommitMessage())
+            || !view.disableAlertForeverIfCheckBox().equals(config.isDisableAlertForever())
             || view.commitLinesMax().compareTo(config.getMaxCommitLines()) != 0
             || view.commitMessageLengthMinimum().compareTo(config.getMaxCommitMessageLength()) != 0
             || !view.commitMessageRegrex().equals(config.getRegrex())
@@ -66,5 +72,6 @@ public class SmallCellSettingConfigure implements SearchableConfigurable {
     config.setAnalyseCommitMessage(view.analyseCommitMessageCheckBox());
     config.setRegrex(view.commitMessageRegrex());
     config.setGroupIndex(view.commitMessageRegrexGroup());
+    config.setDisableAlertForever(view.disableAlertForeverIfCheckBox());
   }
 }

@@ -21,9 +21,19 @@ public class SmallCellSettingConfig implements PersistentStateComponent<SmallCel
 
   Integer maxCommitMessageLength = 10;
 
+  Boolean disableAlertForever = false;
+
   String regrex = "(.*)(]-|] -|~|])(.*)";
 
   Integer groupIndex = 3;
+
+  public Boolean isDisableAlertForever() {
+    return disableAlertForever;
+  }
+
+  public void setDisableAlertForever(Boolean disableAlertForever) {
+    this.disableAlertForever = disableAlertForever;
+  }
 
   public Integer getGroupIndex() {
     return groupIndex;
@@ -40,7 +50,7 @@ public class SmallCellSettingConfig implements PersistentStateComponent<SmallCel
     this.regrex = regrex;
   }
 
-  public boolean isAnalyseCommitMessage() {
+  public Boolean isAnalyseCommitMessage() {
     return analyseCommitMessage;
   }
 
@@ -65,7 +75,7 @@ public class SmallCellSettingConfig implements PersistentStateComponent<SmallCel
   }
 
 
-  public boolean isAnalyseCommitLines() {
+  public Boolean isAnalyseCommitLines() {
     return analyseCommitLines;
   }
 

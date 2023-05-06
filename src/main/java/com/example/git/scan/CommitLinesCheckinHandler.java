@@ -9,11 +9,8 @@ import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.vcs.CheckinProjectPanel;
-import com.intellij.openapi.vcs.ProjectLevelVcsManager;
-import com.intellij.openapi.vcs.changes.Change;
 import com.intellij.openapi.vcs.changes.CommitExecutor;
 import com.intellij.openapi.vcs.checkin.CheckinHandler;
-import com.intellij.openapi.vcs.checkin.CheckinHandlerUtil;
 import com.intellij.openapi.vcs.ui.RefreshableOnComponent;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiDocumentManager;
@@ -28,13 +25,9 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.StringJoiner;
 
 import javax.swing.*;
-
-import git4idea.commands.Git;
-import git4idea.commands.GitCommand;
-import git4idea.commands.GitCommandResult;
-import git4idea.commands.GitLineHandler;
 
 import static com.example.git.scan.SmallCellSettingConfig.getConfig;
 
@@ -53,7 +46,7 @@ public class CommitLinesCheckinHandler extends CheckinHandler {
   private SmallCellSettingConfig config;
   private CheckinProjectPanel panel;
 
-  private Map<String, String[]> gitDiffNumStat = new HashMap<>(16);
+  private Map<String, List<FileDiff>> gitDiffNumStat = new HashMap<>(8);
 
   private Long total;
 
@@ -83,63 +76,71 @@ public class CommitLinesCheckinHandler extends CheckinHandler {
 
   @Override
   public ReturnResult beforeCheckin(@Nullable CommitExecutor executor, PairConsumer<Object, Object> additionalDataConsumer) {
-    if (!config.isAnalyseCommitLines()) {
+    if (Boolean.FALSE.equals(config.isAnalyseCommitLines())) {
       return ReturnResult.COMMIT;
     }
+
     if (DumbService.getInstance(myProject).isDumb()) {
       if (Messages.showOkCancelDialog(myProject, MESSAGE, dialogTitle, waitingText, commitText, null) == Messages.OK) {
         return ReturnResult.CANCEL;
       }
       return ReturnResult.COMMIT;
     }
-    List<VirtualFile> virtualFiles = CheckinHandlerUtil.filterOutGeneratedAndExcludedFiles(panel.getVirtualFiles(), myProject);
-    boolean hasViolation = hasViolation(virtualFiles, myProject);
+    boolean hasViolation = hasViolation(myProject);
     if (!hasViolation) {
       BalloonNotifications.showSuccessNotification(randomPhase(total), myProject, "Analyze Finished");
       return CheckinHandler.ReturnResult.COMMIT;
     }
 
-    if (Messages.showOkCancelDialog(myProject, "Commit lines greater than " + config.getMaxCommitLines() + "!,continue commit?",
+    if (Messages.showOkCancelDialog(myProject,
+            "Commit " + total + " lines greater than " + config.getMaxCommitLines() + "!,continue commit?",
             dialogTitle, commitText, cancelText, null) == Messages.OK) {
       return CheckinHandler.ReturnResult.COMMIT;
     } else {
-      doAnalysis(myProject, virtualFiles);
+      showDiffStat(myProject);
       return ReturnResult.CANCEL;
     }
 
 
   }
 
-  private void doAnalysis(Project myProject, List<VirtualFile> virtualFiles) {
-    //todo show every file's modify lines
+  private void showDiffStat(Project myProject) {
+    //todo show every file's modify lines with inspection
+    BalloonNotifications.showSuccessNotification(prettyNumDiff(), myProject, "Diff Num Stat");
   }
 
-  private boolean hasViolation(List<VirtualFile> virtualFiles, Project myProject) {
+  private String prettyNumDiff() {
+    StringJoiner builder = new StringJoiner("\n");
+    gitDiffNumStat.forEach((root, diffs) -> {
+      builder.add("insert\tdelete\tfile");
+      diffs.forEach(diff -> builder.add(diff.toString()));
+    });
+    return builder.toString();
+  }
+
+  private boolean hasViolation(Project myProject) {
     ApplicationManager.getApplication().assertIsDispatchThread();
     PsiDocumentManager.getInstance(myProject).commitAllDocuments();
     if (ApplicationManager.getApplication().isWriteAccessAllowed()) {
       throw new RuntimeException("Must not run under write action");
     }
 
-//    try {
-//      DiffApplicationBase.refreshAndEnsureFilesValid(virtualFiles);
-//    } catch (Exception e) {
-//      throw new RuntimeException(e);
-//    }
-
     gitDiffNumStat.clear();
-    getGitDiffNumStat(virtualFiles, myProject);
+    getGitDiffNumStat(myProject);
     total = gitDiffNumStat.values().stream().mapToLong(this::calculateChangeLinesNum).sum();
     return total > config.getMaxCommitLines();
   }
 
-  private Long calculateChangeLinesNum(String[] v) {
-    Long added = parse(v[0]);
-    Long deleted = parse(v[1]);
-    return added + deleted;
+  private Long calculateChangeLinesNum(List<FileDiff> v) {
+    long commitLines = 0L;
+    for (FileDiff fileDiff : v) {
+      commitLines += parse(fileDiff.getInsert());
+      commitLines += parse(fileDiff.getDelete());
+    }
+    return commitLines;
   }
 
-  private static Long parse(String number) {
+  private static long parse(String number) {
     try {
       return Long.parseLong(number);
     } catch (NumberFormatException ignore) {
@@ -147,56 +148,49 @@ public class CommitLinesCheckinHandler extends CheckinHandler {
     }
   }
 
-  private void getGitDiffNumStat(List<VirtualFile> virtualFiles, Project myProject) {
-    ProjectLevelVcsManager manager = ProjectLevelVcsManager.getInstance(myProject);
-    VirtualFile vcsRoot = null;
-    // 本次提交有被版本控制的文件
-    if (!manager.hasAnyMappings()) {
+  private void getGitDiffNumStat(Project myProject) {
+
+    // check any vcs root exists, although when this panel show, vcs root always exist.
+    if (panel.getRoots().isEmpty()) {
       return;
     }
-    // 找出任意一个被版本控制的文件, 通过它获取到版本控制的根对象
-    for (VirtualFile virtualFile : virtualFiles) {
-      if ((vcsRoot = manager.getVcsRootFor(virtualFile)) != null) {
-        break;
-      }
+
+    List<GitCommandRunner> commands = new ArrayList<>();
+    for (VirtualFile root : panel.getRoots()) {
+      commands.add(new GitCommandRunner(root, panel));
     }
 
-    GitLineHandler commit = new GitLineHandler(myProject, vcsRoot, GitCommand.COMMIT);
-    commit.addParameters("-o");
-    for (Change change : panel.getSelectedChanges()) {
-      commit.addParameters(change.getAfterRevision().getFile().getPath());
-    }
-    commit.addParameters("-m");
-    commit.addParameters("test-commit");
-
-    GitLineHandler diff = new GitLineHandler(myProject, vcsRoot, GitCommand.DIFF);
-    diff.addParameters("HEAD~1");
-    diff.addParameters("HEAD~0");
-    diff.addParameters("--numstat");
-
-    GitLineHandler reset = new GitLineHandler(myProject, vcsRoot, GitCommand.RESET);
-    reset.addParameters("HEAD~1");
-    reset.addParameters("--soft");
     ProgressManager.getInstance().run(new Task.Modal(myProject, dialogTitle, true) {
       @Override
       public void run(@NotNull ProgressIndicator indicator) {
-        try {
-          Git git = Git.getInstance();
-          git.runCommand(commit);
-          GitCommandResult gitCommandResult = git.runCommand(diff);
-          git.runCommand(reset);
+        for (GitCommandRunner command : commands) {
 
-          // 10 10  file.txt : insert  deleted  filename
-          String output = gitCommandResult.getOutputAsJoinedString();
-          String[] lines = output.split("\n");
-          for (String line : lines) {
-            String[] split = line.split("\t", 3);
-            gitDiffNumStat.put(split[2], split);
+          // must not be interrupted, ensure we can reset workspace to here.
+          command.revParse();
+
+          try {
+            indicator.checkCanceled();
+            indicator.setText("Vcs Root: " + command.getVcsRoot().getPath());
+            List<String> diffNumStatOutPut = command.getDiffNumStatOutPut(indicator);
+            List<FileDiff> fileDiffs = new ArrayList<>(16);
+            for (String line : diffNumStatOutPut) {
+              String[] split = line.split("\t", 3);
+              fileDiffs.add(new FileDiff(split[0], split[1], split[2]));
+            }
+            gitDiffNumStat.put(command.getVcsRoot().getPath(), fileDiffs);
+
+            // canceled manually, ignore
+          } catch (ProcessCanceledException canceledException) {
+            gitDiffNumStat.clear();
+            command.reset();
+
+          } catch (Exception e) {
+            BalloonNotifications.showErrorNotification(command.getVcsRoot().getPath()
+                    + ": Vcs Root Analyse Failed\n" + e, myProject, null);
+            gitDiffNumStat.clear();
+            command.reset();
           }
-        } catch (ProcessCanceledException canceledException) {
-          gitDiffNumStat.clear();
         }
-
       }
     });
   }
@@ -208,7 +202,7 @@ public class CommitLinesCheckinHandler extends CheckinHandler {
 
       @Override
       public void refresh() {
-
+        //do nothing, just compatible lower idea version
       }
 
       @Override

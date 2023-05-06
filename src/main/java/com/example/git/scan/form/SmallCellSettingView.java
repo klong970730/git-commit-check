@@ -23,14 +23,20 @@ public class SmallCellSettingView {
   private JPanel mainPanel;
   private JTextField commitMessageRegrex;
   private JSpinner commitMessageRegrexGroup;
+  private JCheckBox disableAlertForeverIfCheckBox;
 
   public SmallCellSettingView(SmallCellSettingConfig smallCellSettingConfig) {
+    init(smallCellSettingConfig);
+  }
+
+  public void init(SmallCellSettingConfig smallCellSettingConfig) {
     analyseDiffLinesBeforeCheckBox.setSelected(smallCellSettingConfig.isAnalyseCommitLines());
     analyseCommitMessageCheckBox.setSelected(smallCellSettingConfig.isAnalyseCommitMessage());
     commitLinesMax.setValue(smallCellSettingConfig.getMaxCommitLines());
     commitMessageLengthMinimum.setValue(smallCellSettingConfig.getMaxCommitMessageLength());
     commitMessageRegrex.setText(smallCellSettingConfig.getRegrex());
     commitMessageRegrexGroup.setValue(smallCellSettingConfig.getGroupIndex());
+    disableAlertForeverIfCheckBox.setSelected(smallCellSettingConfig.isDisableAlertForever());
   }
 
 
@@ -38,6 +44,10 @@ public class SmallCellSettingView {
 
   public JComponent getMainPanel() {
     return mainPanel;
+  }
+
+  public Boolean disableAlertForeverIfCheckBox() {
+    return disableAlertForeverIfCheckBox.isSelected();
   }
 
   public Boolean analyseDiffLinesBeforeCheckBox() {
