@@ -84,23 +84,12 @@ public class CommitMessageCheckinHandler extends CheckinHandler {
     if (Boolean.TRUE.equals(config.isDisableAlertForever()) || Boolean.TRUE.equals(disableOnceRuntime)) {
       return;
     }
-    NotificationAction disableAlertOnce = new NotificationAction("Disable alert in this runtime") {
+
+    NotificationAction disableCheck = new NotificationAction("Disable commit message check") {
       @Override
       public void actionPerformed(@NotNull AnActionEvent e, @NotNull Notification notification) {
-        disableOnceRuntime = Boolean.TRUE;
-
-        notifyCommon("Commit message regrex nomatch warning will not show in this runtime.\n" +
-                "Always check original commit message's length when regrex not matched.");
-        notification.expire();
-      }
-    };
-
-    NotificationAction disableAlertForever = new NotificationAction("Disable alert forever") {
-      @Override
-      public void actionPerformed(@NotNull AnActionEvent e, @NotNull Notification notification) {
-        config.setDisableAlertForever(Boolean.TRUE);
-        notifyCommon("Commit message regrex nomatch warning will not show forever.\n" +
-                "Always check original commit message's length when regrex not matched.");
+        config.setAnalyseCommitMessage(Boolean.FALSE);
+        notifyCommon("Commit message length check disabled forever.\nYou can enable it at Small Cell Setting.");
         notification.expire();
       }
     };
@@ -114,11 +103,22 @@ public class CommitMessageCheckinHandler extends CheckinHandler {
         notification.expire();
       }
     };
-    NotificationAction disableCheck = new NotificationAction("Disable commit message check") {
+    NotificationAction disableAlertForever = new NotificationAction("Disable alert forever") {
       @Override
       public void actionPerformed(@NotNull AnActionEvent e, @NotNull Notification notification) {
-        config.setAnalyseCommitMessage(Boolean.FALSE);
-        notifyCommon("Commit message length check disabled forever.\nYou can enable it at Small Cell Setting.");
+        config.setDisableAlertForever(Boolean.TRUE);
+        notifyCommon("Commit message regrex nomatch warning will not show forever.\n" +
+                "Always check original commit message's length when regrex not matched.");
+        notification.expire();
+      }
+    };
+    NotificationAction disableAlertOnce = new NotificationAction("Disable alert in this runtime") {
+      @Override
+      public void actionPerformed(@NotNull AnActionEvent e, @NotNull Notification notification) {
+        disableOnceRuntime = Boolean.TRUE;
+
+        notifyCommon("Commit message regrex nomatch warning will not show in this runtime.\n" +
+                "Always check original commit message's length when regrex not matched.");
         notification.expire();
       }
     };
